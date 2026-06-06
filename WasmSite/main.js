@@ -1,8 +1,9 @@
 import {
+  ConsoleStdout,
   File,
   OpenFile,
   WASI,
-} from "https://cdn.jsdelivr.net/npm/@bjorn3/browser_wasi_shim@0.4.1/+esm";
+} from "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0";
 
 const runButton = document.querySelector("#runButton");
 const statusElement = document.querySelector("#status");
@@ -24,12 +25,16 @@ async function runSmokeTest() {
 
   const wasmBytes = await loadWasmBytes(wasmURL);
 
-  const stdout = new CapturingFile();
-  const stderr = new CapturingFile();
+  let stdoutText = "";
+  let stderrText = "";
   const fds = [
     new OpenFile(new File([])),
-    new OpenFile(stdout),
-    new OpenFile(stderr),
+    ConsoleStdout.lineBuffered((line) => {
+      stdoutText += `${line}\n`;
+    }),
+    ConsoleStdout.lineBuffered((line) => {
+      stderrText += `${line}\n`;
+    }),
   ];
   const wasi = new WASI([], [], fds);
   const wasm = await WebAssembly.compile(wasmBytes);
@@ -37,27 +42,14 @@ async function runSmokeTest() {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
 
-  let exitCode = 0;
-  try {
-    wasi.start(instance);
-  } catch (error) {
-    if (typeof error?.code === "number") {
-      exitCode = error.code;
-    } else {
-      throw error;
-    }
-  }
+  wasi.start(instance);
 
-  const stdoutText = stdout.text();
-  const stderrText = stderr.text();
   const parsed = parseSmokeOutput(stdoutText);
-  const ok = exitCode === 0 && parsed?.ok === true;
+  const ok = parsed?.ok === true;
 
   statusElement.className = ok ? "status pass" : "status fail";
   statusElement.textContent = ok ? "Passed" : "Failed";
   outputElement.textContent = [
-    `exitCode: ${exitCode}`,
-    "",
     "stdout:",
     stdoutText || "(empty)",
     "",
@@ -98,18 +90,3 @@ function renderFailure(error) {
   runButton.disabled = false;
 }
 
-class CapturingFile extends File {
-  constructor() {
-    super([]);
-    this.bytes = [];
-  }
-
-  write(buffer) {
-    this.bytes.push(...buffer);
-    return { ret: buffer.length };
-  }
-
-  text() {
-    return new TextDecoder().decode(new Uint8Array(this.bytes));
-  }
-}

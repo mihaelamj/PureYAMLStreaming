@@ -47,7 +47,6 @@ do {
         message: ok ? "PureYAMLStreaming WASM smoke passed" : "PureYAMLStreaming WASM smoke failed",
     )
     print(try renderJSON(result))
-    Foundation.exit(ok ? 0 : 1)
 } catch {
     let result = SmokeResult(
         ok: false,
@@ -57,7 +56,6 @@ do {
         message: String(describing: error),
     )
     print((try? renderJSON(result)) ?? #"{"ok":false,"message":"failed to render error"}"#)
-    Foundation.exit(1)
 }
 
 func stringValue(_ key: String, in value: PureYAML.Model.Value) -> String? {
