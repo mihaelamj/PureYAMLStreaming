@@ -40,6 +40,10 @@ const streamControlIndex = {
 };
 const streamControlCount = 16;
 const streamBufferCapacity = 1024 * 1024;
+const documentRenderBudget = 64 * 1024;
+let documentRenderQueue = [];
+let documentRenderScheduled = false;
+let documentRenderResolvers = [];
 
 const samples = [
   {
@@ -157,6 +161,8 @@ async function runBenchmark() {
   const yamlBytes = new Uint8Array(await response.arrayBuffer());
   const fetchMS = performance.now() - fetchStart;
   replaceStreamDocument(decodeYAMLBytes(yamlBytes));
+  await waitForDocumentFlush();
+  await nextPaint();
   logStep(`Fetched HTTP ${response.status}, ${formatBytes(yamlBytes.byteLength)} in ${formatDuration(fetchMS)}.`);
   logStep("Handing buffered response to SwiftWASIHTTPClient.HostHTTPClient through WASI stdin.");
 
@@ -329,6 +335,7 @@ async function runStreamingBenchmark() {
     throw error;
   }
   appendStreamDocumentChunk(documentDecoder.decode());
+  await waitForDocumentFlush();
   Atomics.store(control, streamControlIndex.closed, 1);
   wakeRingBuffer(control);
   const fetchMS = performance.now() - fetchStart;
@@ -552,12 +559,17 @@ function copyTextWithTextarea(text) {
 }
 
 function resetStreamDocument(message) {
+  documentRenderQueue = [];
+  documentRenderResolvers.splice(0).forEach((resolve) => resolve());
   streamDocumentElement.replaceChildren(document.createTextNode(message));
   streamDocumentElement.scrollTop = 0;
 }
 
 function replaceStreamDocument(text) {
-  streamDocumentElement.replaceChildren(renderYAMLSyntax(text || "(empty document)"));
+  documentRenderQueue = [];
+  documentRenderResolvers.splice(0).forEach((resolve) => resolve());
+  streamDocumentElement.replaceChildren();
+  appendStreamDocumentChunk(text || "(empty document)");
   streamDocumentElement.scrollTop = 0;
 }
 
@@ -568,12 +580,56 @@ function appendStreamDocumentChunk(text) {
   if (streamDocumentElement.childNodes.length === 1 && streamDocumentElement.textContent.startsWith("Waiting for")) {
     streamDocumentElement.replaceChildren();
   }
-  streamDocumentElement.append(renderYAMLSyntax(text));
-  streamDocumentElement.scrollTop = streamDocumentElement.scrollHeight;
+  documentRenderQueue.push(text);
+  scheduleDocumentFlush();
 }
 
 function decodeYAMLBytes(bytes) {
   return new TextDecoder().decode(bytes);
+}
+
+function scheduleDocumentFlush() {
+  if (documentRenderScheduled) {
+    return;
+  }
+  documentRenderScheduled = true;
+  requestAnimationFrame(flushDocumentRenderQueue);
+}
+
+function flushDocumentRenderQueue() {
+  documentRenderScheduled = false;
+  let remainingBudget = documentRenderBudget;
+  const fragment = document.createDocumentFragment();
+
+  while (documentRenderQueue.length > 0 && remainingBudget > 0) {
+    const next = documentRenderQueue.shift();
+    const piece = next.length > remainingBudget ? next.slice(0, remainingBudget) : next;
+    const rest = next.length > remainingBudget ? next.slice(remainingBudget) : "";
+    fragment.append(renderYAMLSyntax(piece));
+    remainingBudget -= piece.length;
+    if (rest) {
+      documentRenderQueue.unshift(rest);
+    }
+  }
+
+  streamDocumentElement.append(fragment);
+  streamDocumentElement.scrollTop = streamDocumentElement.scrollHeight;
+
+  if (documentRenderQueue.length > 0) {
+    scheduleDocumentFlush();
+    return;
+  }
+
+  documentRenderResolvers.splice(0).forEach((resolve) => resolve());
+}
+
+function waitForDocumentFlush() {
+  if (!documentRenderScheduled && documentRenderQueue.length === 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    documentRenderResolvers.push(resolve);
+  });
 }
 
 function renderYAMLSyntax(text) {
