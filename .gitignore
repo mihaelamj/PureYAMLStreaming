@@ -3,3 +3,4 @@
 .DS_Store
 WasmSite/*.wasm
 WasmSite/*.wasm.gz
+WasmSite/vendor/

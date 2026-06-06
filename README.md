@@ -55,11 +55,15 @@ Live site:
 
 `https://mihaelamj.github.io/PureYAMLStreaming/`
 
-Build the Swift WASI smoke executable and copy it into the static test site:
+Build the Swift WASI benchmark executable and copy it into the static test site:
 
 ```sh
 bash scripts/build-wasm-site.sh
 ```
+
+The build script requires `npm` so it can stage the pinned browser WASI shim as
+a local `WasmSite/vendor/` asset. The deployed page does not import the shim from
+a runtime CDN.
 
 Serve the site locally:
 
@@ -67,11 +71,15 @@ Serve the site locally:
 bash scripts/serve-wasm-site.sh
 ```
 
-Then open `http://localhost:8080` and click **Run WASM Test**. The page loads
-`pureyaml-streaming-wasm-smoke.wasm`, lets you choose from 10+ public real-world
-YAML files, fetches the selected file in JavaScript, feeds the bytes to Swift
-through WASI stdin, and reports fetch time, parse time, throughput, document
-count, and stdout JSON.
+Then open `http://localhost:8080` and click **Run Benchmark**. The page loads
+`pureyaml-streaming-wasm-smoke.wasm`, lets you choose from 10+ public
+multi-megabyte YAML files, fetches the selected file in JavaScript, feeds the
+bytes to Swift through WASI stdin, and reports fetch time, parse time,
+throughput, document count, and stdout JSON.
+
+The browser fetch step currently buffers the selected YAML file before invoking
+the WASM guest. Inside Swift, the parser path counts documents through
+`parseDocuments` callbacks rather than retaining all parsed documents.
 
 ## Relationship To PureYAML
 

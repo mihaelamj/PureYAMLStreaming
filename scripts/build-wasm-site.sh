@@ -6,6 +6,7 @@ SDK_ID="${PUREYAML_STREAMING_WASM_SDK:-swift-6.3.2-RELEASE_wasm}"
 SWIFT_SELECTOR="${PUREYAML_STREAMING_WASM_SWIFT_SELECTOR:-+6.3.2}"
 PRODUCT="pureyaml-streaming-wasm-smoke"
 SITE_DIR="$ROOT_DIR/WasmSite"
+VENDOR_DIR="$SITE_DIR/vendor/browser_wasi_shim"
 
 swift_command() {
   if command -v swiftly >/dev/null 2>&1; then
@@ -42,6 +43,22 @@ else
 fi
 
 gzip -9 -c "$STAGED_WASM" > "$STAGED_WASM.gz"
+
+if command -v npm >/dev/null 2>&1; then
+  TMP_NPM_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_NPM_DIR"' EXIT
+  (
+    cd "$TMP_NPM_DIR"
+    npm init -y >/dev/null
+    npm install @bjorn3/browser_wasi_shim@0.3.0 >/dev/null
+  )
+  rm -rf "$VENDOR_DIR"
+  mkdir -p "$VENDOR_DIR"
+  cp "$TMP_NPM_DIR/node_modules/@bjorn3/browser_wasi_shim/dist/"*.js "$VENDOR_DIR/"
+else
+  echo "wasm: npm is required to vendor browser_wasi_shim" >&2
+  exit 2
+fi
 
 echo "WASM test site ready:"
 echo "  $SITE_DIR/index.html"

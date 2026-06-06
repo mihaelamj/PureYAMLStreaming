@@ -3,7 +3,7 @@ import {
   File,
   OpenFile,
   WASI,
-} from "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0";
+} from "./vendor/browser_wasi_shim/index.js";
 
 const runButton = document.querySelector("#runButton");
 const sampleSelect = document.querySelector("#sampleSelect");
@@ -21,52 +21,52 @@ let modulePromise = null;
 
 const samples = [
   {
-    name: "GitHub REST API OpenAPI (9.5 MB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/github-rest-api.yaml",
+    name: "GitHub REST API OpenAPI (8.39 MiB)",
+    url: "https://api.apis.guru/v2/specs/github.com/1.1.4/openapi.yaml",
   },
   {
-    name: "Zoom OpenAPI (5.0 MB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/api-guru-zoom-openapi.yaml",
+    name: "Loket.nl API OpenAPI (10.62 MiB)",
+    url: "https://api.apis.guru/v2/specs/loket.nl/V2/openapi.yaml",
   },
   {
-    name: "Stripe OpenAPI (3.7 MB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/api-guru-stripe-openapi.yaml",
+    name: "Zuora Billing API OpenAPI (6.46 MiB)",
+    url: "https://api.apis.guru/v2/specs/zuora.com/2021-08-20/openapi.yaml",
   },
   {
-    name: "cert-manager Helm values (65 KB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/cert-manager-values.yaml",
+    name: "Amazon EC2 OpenAPI (5.36 MiB)",
+    url: "https://api.apis.guru/v2/specs/amazonaws.com/ec2/2016-11-15/openapi.yaml",
   },
   {
-    name: "cert-manager CRD (44 KB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/cert-manager-certificate-crd.yaml",
+    name: "Zoom API OpenAPI (4.80 MiB)",
+    url: "https://api.apis.guru/v2/specs/zoom.us/2.0.0/openapi.yaml",
   },
   {
-    name: "Kubernetes Prow presubmits (14 KB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/prow-cluster-api-presubmits.yaml",
+    name: "UniCourt Enterprise APIs OpenAPI (4.29 MiB)",
+    url: "https://api.apis.guru/v2/specs/unicourt.com/1.0.0/openapi.yaml",
   },
   {
-    name: "Prometheus config (12 KB)",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/prometheus-conf-good.yml",
+    name: "Kubernetes Swagger (4.26 MiB)",
+    url: "https://api.apis.guru/v2/specs/kubernetes.io/unversioned/swagger.yaml",
   },
   {
-    name: "USPTO OpenAPI",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/openapi-uspto.yaml",
+    name: "Autotask PSA Swagger (3.90 MiB)",
+    url: "https://api.apis.guru/v2/specs/autotask.net/v1/swagger.yaml",
   },
   {
-    name: "OpenAPI petstore expanded",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/openapi-petstore-expanded.yaml",
+    name: "Google Document AI Warehouse OpenAPI (3.61 MiB)",
+    url: "https://api.apis.guru/v2/specs/googleapis.com/contentwarehouse/v1/openapi.yaml",
   },
   {
-    name: "Bitnami Apache values",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/bitnami-apache-values.yaml",
+    name: "Stripe API OpenAPI (3.48 MiB)",
+    url: "https://api.apis.guru/v2/specs/stripe.com/2022-11-15/openapi.yaml",
   },
   {
-    name: "GitHub Actions Swift format",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/github-actions-swift-format.yml",
+    name: "Google Compute Engine OpenAPI (3.32 MiB)",
+    url: "https://api.apis.guru/v2/specs/googleapis.com/compute/v1/openapi.yaml",
   },
   {
-    name: "Docker Compose Prometheus/Grafana",
-    url: "https://raw.githubusercontent.com/mihaelamj/PureYAMLGeekbench/main/Fixtures/real-yaml/awesome-compose-prometheus-grafana-compose-yaml.yaml",
+    name: "DocuSign REST API OpenAPI (3.14 MiB)",
+    url: "https://api.apis.guru/v2/specs/docusign.net/v2.1/openapi.yaml",
   },
 ];
 
@@ -105,7 +105,7 @@ async function runBenchmark() {
   const moduleLoadMS = performance.now() - moduleLoadStart;
 
   const fetchStart = performance.now();
-  const response = await fetch(cacheBustedURL(sourceURL), { cache: "no-store" });
+  const response = await fetch(sourceURL, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch YAML: HTTP ${response.status}`);
   }
@@ -130,11 +130,15 @@ async function runBenchmark() {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
   wasi.start(instance);
-  const parseMS = performance.now() - parseStart;
+  const wallClockParseMS = performance.now() - parseStart;
 
   const parsed = parseSmokeOutput(stdoutText);
   const ok = parsed?.ok === true;
-  const throughput = yamlBytes.byteLength / (parseMS / 1000);
+  if (!Number.isFinite(parsed?.parseMilliseconds)) {
+    throw new Error("WASM output did not include a finite Swift parseMilliseconds value.");
+  }
+  const parseMS = parsed.parseMilliseconds;
+  const throughput = parseMS > 0 ? yamlBytes.byteLength / (parseMS / 1000) : 0;
 
   statusElement.className = ok ? "status pass" : "status fail";
   statusElement.textContent = ok ? "Passed" : "Failed";
@@ -147,7 +151,8 @@ async function runBenchmark() {
     `url: ${sourceURL}`,
     `moduleLoad: ${formatDuration(moduleLoadMS)}`,
     `fetch: ${formatDuration(fetchMS)}`,
-    `parse: ${formatDuration(parseMS)}`,
+    `swiftParse: ${formatDuration(parseMS)}`,
+    `processWallClock: ${formatDuration(wallClockParseMS)}`,
     `throughput: ${formatBytes(throughput)}/s`,
     "",
     "stdout:",
@@ -180,12 +185,6 @@ async function loadWasmBytes(url) {
   }
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Response(stream).arrayBuffer();
-}
-
-function cacheBustedURL(url) {
-  const parsedURL = new URL(url, location.href);
-  parsedURL.searchParams.set("_pureyaml_bench", `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  return parsedURL.href;
 }
 
 function parseSmokeOutput(text) {

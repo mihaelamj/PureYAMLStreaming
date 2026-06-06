@@ -8,6 +8,7 @@ struct SmokeResult: Encodable {
     var documentCount: Int
     var firstName: String?
     var lastName: String?
+    var parseMilliseconds: Double
     var message: String
 }
 
@@ -32,22 +33,33 @@ let fallbackYAML = Data(
 )
 
 do {
-    let input = CommandLine.arguments.count > 1
+    let readsStandardInput = CommandLine.arguments.count > 1
+    let input = readsStandardInput
         ? FileHandle.standardInput.readDataToEndOfFile()
         : Data()
-    let yaml = input.isEmpty ? fallbackYAML : input
+    let yaml = readsStandardInput ? input : fallbackYAML
     let parser = PureYAMLStreaming.Parser(chunkSize: 31)
-    let documents = try parser.collectDocuments(data: yaml)
-    let names = documents.compactMap { document in
-        stringValue("name", in: document.value)
+    let parseStart = Date()
+    var documentCount = 0
+    var firstName: String?
+    var lastName: String?
+    try parser.parseDocuments(data: yaml) { document in
+        let name = stringValue("name", in: document.value)
+        if documentCount == 0 {
+            firstName = name
+        }
+        lastName = name
+        documentCount += 1
     }
-    let ok = !documents.isEmpty
+    let parseMilliseconds = Date().timeIntervalSince(parseStart) * 1_000
+    let ok = documentCount > 0
     let result = SmokeResult(
         ok: ok,
         inputByteCount: yaml.count,
-        documentCount: documents.count,
-        firstName: names.first,
-        lastName: names.last,
+        documentCount: documentCount,
+        firstName: firstName,
+        lastName: lastName,
+        parseMilliseconds: parseMilliseconds,
         message: ok ? "PureYAMLStreaming WASM parse passed" : "PureYAMLStreaming WASM parse found no documents",
     )
     print(try renderJSON(result))
@@ -58,6 +70,7 @@ do {
         documentCount: 0,
         firstName: nil,
         lastName: nil,
+        parseMilliseconds: 0,
         message: String(describing: error),
     )
     print((try? renderJSON(result)) ?? #"{"ok":false,"message":"failed to render error"}"#)
