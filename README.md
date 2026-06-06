@@ -1,5 +1,11 @@
 # PureYAMLStreaming
 
+[![macOS](https://img.shields.io/github/actions/workflow/status/mihaelamj/PureYAMLStreaming/macos.yml?branch=main&label=macOS)](https://github.com/mihaelamj/PureYAMLStreaming/actions/workflows/macos.yml)
+[![Linux](https://img.shields.io/github/actions/workflow/status/mihaelamj/PureYAMLStreaming/linux.yml?branch=main&label=Linux)](https://github.com/mihaelamj/PureYAMLStreaming/actions/workflows/linux.yml)
+[![Windows](https://img.shields.io/github/actions/workflow/status/mihaelamj/PureYAMLStreaming/windows.yml?branch=main&label=Windows)](https://github.com/mihaelamj/PureYAMLStreaming/actions/workflows/windows.yml)
+[![WASM](https://img.shields.io/github/actions/workflow/status/mihaelamj/PureYAMLStreaming/wasm.yml?branch=main&label=WASM)](https://github.com/mihaelamj/PureYAMLStreaming/actions/workflows/wasm.yml)
+[![WASM Site](https://img.shields.io/github/actions/workflow/status/mihaelamj/PureYAMLStreaming/wasm-site.yml?branch=main&label=WASM%20Site)](https://github.com/mihaelamj/PureYAMLStreaming/actions/workflows/wasm-site.yml)
+
 Experimental full-streaming incubator for PureYAML.
 
 This package is intentionally separate from `PureYAML` while the chunked input,
@@ -42,6 +48,28 @@ try parser.parseDocuments(from: url) { document in
     print("document", document.index, document.value)
 }
 ```
+
+## WASM Browser Smoke Site
+
+Live site:
+
+`https://mihaelamj.github.io/PureYAMLStreaming/`
+
+Build the Swift WASI smoke executable and copy it into the static test site:
+
+```sh
+bash scripts/build-wasm-site.sh
+```
+
+Serve the site locally:
+
+```sh
+bash scripts/serve-wasm-site.sh
+```
+
+Then open `http://localhost:8080` and click **Run WASM Test**. The page loads
+`pureyaml-streaming-wasm-smoke.wasm`, runs a chunked document-stream parse in
+the browser through a WASI shim, captures stdout, and renders pass/fail.
 
 ## Relationship To PureYAML
 

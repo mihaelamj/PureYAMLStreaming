@@ -1,0 +1,110 @@
+name: WASM Test Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Package.swift"
+      - "Sources/PureYAMLStreaming/**"
+      - "Sources/PureYAMLStreamingWasmSmoke/**"
+      - "WasmSite/**"
+      - "scripts/build-wasm-site.sh"
+      - ".github/workflows/wasm-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pureyaml-streaming-wasm-site
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binaryen gzip libcurl4-openssl-dev
+
+      - name: Install swiftly
+        run: |
+          curl -L https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz > swiftly.tar.gz
+          tar zxf swiftly.tar.gz
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+
+      - name: Install Swift 6.3.2 and Wasm SDK
+        run: |
+          . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+          swiftly install --use 6.3.2
+          swiftly run swift sdk install https://download.swift.org/swift-6.3.2-release/wasm-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_wasm.artifactbundle.tar.gz --checksum a61f0584c93283589f8b2f42db05c1f9a182b506c2957271402992655591dd7c +6.3.2
+
+      - name: Build WASM site
+        run: |
+          . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+          bash scripts/build-wasm-site.sh
+          mkdir -p site
+          cp WasmSite/index.html site/index.html
+          cp WasmSite/main.js site/main.js
+          cp WasmSite/style.css site/style.css
+          cp WasmSite/pureyaml-streaming-wasm-smoke.wasm.gz site/pureyaml-streaming-wasm-smoke.wasm.gz
+          ls -lh site
+
+      - name: Install Playwright Chromium
+        run: |
+          mkdir -p .build/playwright-ci
+          cd .build/playwright-ci
+          npm init -y
+          npm install playwright-chromium
+          npx playwright install --with-deps chromium
+
+      - name: Test site locally
+        run: |
+          python3 -m http.server 8766 --bind 127.0.0.1 --directory site &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          node <<'NODE'
+          const { chromium } = require('./.build/playwright-ci/node_modules/playwright-chromium');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto('http://127.0.0.1:8766/?v=' + Date.now());
+            await page.click('#runButton');
+            await page.waitForFunction(
+              () => document.querySelector('#status')?.textContent === 'Passed',
+              null,
+              { timeout: 60000 }
+            );
+            const output = await page.locator('#output').textContent();
+            if (!output.includes('"ok" : true') && !output.includes('"ok":true')) {
+              throw new Error(output);
+            }
+            await browser.close();
+          })();
+          NODE
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

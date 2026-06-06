@@ -12,6 +12,10 @@ let package = Package(
             name: "PureYAMLStreaming",
             targets: ["PureYAMLStreaming"],
         ),
+        .executable(
+            name: "pureyaml-streaming-wasm-smoke",
+            targets: ["PureYAMLStreamingWasmSmoke"],
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/mihaelamj/PureYAML.git", branch: "main"),
@@ -20,6 +24,10 @@ let package = Package(
         .target(
             name: "PureYAMLStreaming",
             dependencies: ["PureYAML"],
+        ),
+        .executableTarget(
+            name: "PureYAMLStreamingWasmSmoke",
+            dependencies: ["PureYAMLStreaming", "PureYAML"],
         ),
         .testTarget(
             name: "PureYAMLStreamingTests",

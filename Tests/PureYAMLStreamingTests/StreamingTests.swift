@@ -57,14 +57,7 @@ struct StreamingTests {
 
     @Test("streaming matches PureYAML on Geekbench fixtures")
     func streamingMatchesGeekbenchFixtures() throws {
-        let fixtureRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("PureYAMLGeekbench")
-            .appendingPathComponent("Fixtures")
-            .appendingPathComponent("real-yaml")
+        let fixtureRoot = geekbenchFixtureRoot()
         guard FileManager.default.fileExists(atPath: fixtureRoot.path) else {
             return
         }
@@ -78,14 +71,46 @@ struct StreamingTests {
 
         #expect(files.count >= 100)
 
-        let streamingParser = PureYAMLStreaming.Parser(chunkSize: 4096)
+        let streamingParser = PureYAMLStreaming.Parser(chunkSize: 31)
         let pureParser = PureYAML.Parsing.Parser()
         for file in files {
             let data = try Data(contentsOf: file)
-            let streamed = try streamingParser.collectDocuments(data: data).map(\.value)
+            var streamed: [PureYAML.Model.Value] = []
+            try streamingParser.parseDocuments(from: file) { document in
+                streamed.append(document.value)
+            }
             let direct = try pureParser.parseStream(String(decoding: data, as: UTF8.self)).map(\.value)
             #expect(streamed == direct)
         }
+    }
+
+    @Test("parser streams generated large file without collecting documents")
+    func parserStreamsGeneratedLargeFileWithoutCollectingDocuments() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pureyaml-stream-\(UUID().uuidString).yaml")
+        try writeGeneratedStream(to: fileURL, documentCount: 5_000)
+        defer {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+
+        let parser = PureYAMLStreaming.Parser(chunkSize: 37)
+        var count = 0
+        var firstName: String?
+        var lastName: String?
+
+        try parser.parseDocuments(from: fileURL) { document in
+            let name = stringValue("name", in: document.value)
+            if count == 0 {
+                firstName = name
+            }
+            lastName = name
+            #expect(document.index == count)
+            count += 1
+        }
+
+        #expect(count == 5_000)
+        #expect(firstName == "doc-0")
+        #expect(lastName == "doc-4999")
     }
 
     private func stringValue(_ key: String, in value: PureYAML.Model.Value) -> String? {
@@ -95,5 +120,40 @@ struct StreamingTests {
             return nil
         }
         return string
+    }
+
+    private func geekbenchFixtureRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("PureYAMLGeekbench")
+            .appendingPathComponent("Fixtures")
+            .appendingPathComponent("real-yaml")
+    }
+
+    private func writeGeneratedStream(to fileURL: URL, documentCount: Int) throws {
+        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer {
+            try? handle.close()
+        }
+
+        for index in 0 ..< documentCount {
+            let document = """
+            ---
+            name: doc-\(index)
+            enabled: \(index.isMultiple(of: 2) ? "true" : "false")
+            nested:
+              index: \(index)
+              tags:
+                - real
+                - streaming
+                - chunk-\(index % 17)
+
+            """
+            try handle.write(contentsOf: Data(document.utf8))
+        }
     }
 }

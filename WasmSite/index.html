@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PureYAMLStreaming WASM Smoke</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p class="eyebrow">PureYAMLStreaming</p>
+        <h1>WASM Streaming Smoke Test</h1>
+        <p>
+          This page loads the Swift WASI build in the browser, runs a
+          document-streaming parse, captures stdout, and reports whether the
+          smoke test passed.
+        </p>
+        <button id="runButton" type="button">Run WASM Test</button>
+        <div id="status" class="status idle">Idle</div>
+      </section>
+
+      <section class="card">
+        <h2>Output</h2>
+        <pre id="output">Click "Run WASM Test".</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
