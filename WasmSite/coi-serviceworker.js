@@ -1,18 +1,26 @@
 (() => {
   const coop = "same-origin";
   const coep = "credentialless";
+  const reloadKey = "pureyamlStreamingCOIReloadedV2";
 
   if (typeof Window !== "undefined" && self instanceof Window) {
     if (window.crossOriginIsolated || !("serviceWorker" in navigator) || !window.isSecureContext) {
       return;
     }
 
-    navigator.serviceWorker.register("./coi-serviceworker.js").then(async () => {
-      await navigator.serviceWorker.ready;
-      if (!navigator.serviceWorker.controller && sessionStorage.getItem("coiReloaded") !== "1") {
-        sessionStorage.setItem("coiReloaded", "1");
+    const reloadForIsolation = () => {
+      if (!window.crossOriginIsolated && sessionStorage.getItem(reloadKey) !== "1") {
+        sessionStorage.setItem(reloadKey, "1");
         window.location.reload();
       }
+    };
+
+    navigator.serviceWorker.addEventListener("controllerchange", reloadForIsolation);
+
+    navigator.serviceWorker.register("./coi-serviceworker.js").then(async (registration) => {
+      await registration.update();
+      await navigator.serviceWorker.ready;
+      reloadForIsolation();
     }).catch((error) => {
       console.warn("Unable to register cross-origin isolation service worker", error);
     });
