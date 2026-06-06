@@ -113,6 +113,7 @@ jobs:
             const parse = await page.locator('#parseMetric').textContent();
             const throughput = await page.locator('#throughputMetric').textContent();
             const documents = await page.locator('#documentsMetric').textContent();
+            const runLog = await page.locator('#runLog').textContent();
             const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
             const parsed = JSON.parse(stdoutMatch?.[1] || '{}');
             if (parsed.ok !== true) throw new Error(output);
@@ -130,6 +131,9 @@ jobs:
             }
             if (!throughput.includes('/s')) {
               throw new Error(`Expected throughput metric, got: ${throughput}`);
+            }
+            if (!runLog.includes('Fetching YAML bytes.') || !runLog.includes('Starting Swift parser.') || !runLog.includes('Benchmark completed successfully.')) {
+              throw new Error(`Expected detailed run log, got: ${runLog}`);
             }
             await browser.close();
           })();
@@ -189,6 +193,7 @@ jobs:
             );
             const output = await page.locator('#output').textContent();
             const throughput = await page.locator('#throughputMetric').textContent();
+            const runLog = await page.locator('#runLog').textContent();
             const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
             const parsed = JSON.parse(stdoutMatch?.[1] || '{}');
             if (parsed.documentCount !== 3000) throw new Error(output);
@@ -199,6 +204,9 @@ jobs:
             }
             if (!throughput.includes('/s')) {
               throw new Error(`Expected live throughput metric, got: ${throughput}`);
+            }
+            if (!runLog.includes('Fetching YAML bytes.') || !runLog.includes('Starting Swift parser.') || !runLog.includes('Benchmark completed successfully.')) {
+              throw new Error(`Expected live detailed run log, got: ${runLog}`);
             }
             await browser.close();
           })();

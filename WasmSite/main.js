@@ -10,6 +10,7 @@ const sampleSelect = document.querySelector("#sampleSelect");
 const urlInput = document.querySelector("#urlInput");
 const statusElement = document.querySelector("#status");
 const outputElement = document.querySelector("#output");
+const runLogElement = document.querySelector("#runLog");
 const bytesMetric = document.querySelector("#bytesMetric");
 const fetchMetric = document.querySelector("#fetchMetric");
 const parseMetric = document.querySelector("#parseMetric");
@@ -18,6 +19,7 @@ const documentsMetric = document.querySelector("#documentsMetric");
 const params = new URLSearchParams(location.search);
 const wasmURL = params.get("wasm") || "./pureyaml-streaming-wasm-smoke.wasm.gz";
 let modulePromise = null;
+let runStartedAt = performance.now();
 
 const samples = [
   {
@@ -96,14 +98,21 @@ async function runBenchmark() {
 
   runButton.disabled = true;
   statusElement.className = "status idle";
-  statusElement.textContent = "Fetching YAML...";
+  statusElement.textContent = "Preparing...";
   outputElement.textContent = "";
   resetMetrics();
+  resetLog();
+  logStep("Queued benchmark run.");
+  logStep(`Selected source: ${sourceURL}`);
 
+  logStep(`Loading WASM module: ${wasmURL}`);
   const moduleLoadStart = performance.now();
   const module = await loadWasmModule(wasmURL);
   const moduleLoadMS = performance.now() - moduleLoadStart;
+  logStep(`WASM module ready in ${formatDuration(moduleLoadMS)}.`);
 
+  statusElement.textContent = "Fetching YAML...";
+  logStep("Fetching YAML bytes.");
   const fetchStart = performance.now();
   const response = await fetch(sourceURL, { cache: "no-store" });
   if (!response.ok) {
@@ -111,7 +120,9 @@ async function runBenchmark() {
   }
   const yamlBytes = new Uint8Array(await response.arrayBuffer());
   const fetchMS = performance.now() - fetchStart;
+  logStep(`Fetched ${formatBytes(yamlBytes.byteLength)} in ${formatDuration(fetchMS)}.`);
 
+  logStep("Preparing WASI file descriptors.");
   let stdoutText = "";
   let stderrText = "";
   const fds = [
@@ -123,15 +134,22 @@ async function runBenchmark() {
       stderrText += `${line}\n`;
     }),
   ];
+  logStep("Creating WASI instance.");
   const wasi = new WASI(["pureyaml-streaming-wasm-smoke", sourceURL], [], fds);
   statusElement.textContent = "Running Swift parser...";
+  logStep("Starting Swift parser. The browser tab can pause while WebAssembly is executing.");
+  await nextPaint();
   const parseStart = performance.now();
   const instance = await WebAssembly.instantiate(module, {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
+  logStep("WebAssembly instance created; entering WASI _start.");
+  await nextPaint();
   wasi.start(instance);
   const wallClockParseMS = performance.now() - parseStart;
+  logStep(`WASI process returned in ${formatDuration(wallClockParseMS)}.`);
 
+  logStep("Parsing Swift JSON result from stdout.");
   const parsed = parseSmokeOutput(stdoutText);
   const ok = parsed?.ok === true;
   if (!Number.isFinite(parsed?.parseMilliseconds)) {
@@ -139,6 +157,9 @@ async function runBenchmark() {
   }
   const parseMS = parsed.parseMilliseconds;
   const throughput = parseMS > 0 ? yamlBytes.byteLength / (parseMS / 1000) : 0;
+  logStep(`Swift parse reported ${formatDuration(parseMS)}.`);
+  logStep(`Parsed ${parsed.documentCount ?? 0} document(s).`);
+  logStep(`Throughput: ${formatBytes(throughput)}/s.`);
 
   statusElement.className = ok ? "status pass" : "status fail";
   statusElement.textContent = ok ? "Passed" : "Failed";
@@ -161,6 +182,7 @@ async function runBenchmark() {
     "stderr:",
     stderrText || "(empty)",
   ].join("\n");
+  logStep(ok ? "Benchmark completed successfully." : "Benchmark finished with parser failure.");
   runButton.disabled = false;
 }
 
@@ -199,6 +221,7 @@ function renderFailure(error) {
   statusElement.className = "status fail";
   statusElement.textContent = "Failed";
   outputElement.textContent = String(error?.stack || error);
+  logStep(`Failed: ${String(error?.message || error)}`, "error");
   runButton.disabled = false;
 }
 
@@ -225,4 +248,26 @@ function formatBytes(byteCount) {
     return `${(byteCount / 1024).toFixed(1)} KiB`;
   }
   return `${(byteCount / 1024 / 1024).toFixed(2)} MiB`;
+}
+
+function resetLog() {
+  runStartedAt = performance.now();
+  runLogElement.replaceChildren();
+}
+
+function logStep(message, level = "info") {
+  const entry = document.createElement("div");
+  entry.className = `log-entry ${level}`;
+  const elapsed = (performance.now() - runStartedAt) / 1000;
+  entry.textContent = `[+${elapsed.toFixed(3)}s] ${message}`;
+  runLogElement.append(entry);
+  runLogElement.scrollTop = runLogElement.scrollHeight;
+}
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
 }

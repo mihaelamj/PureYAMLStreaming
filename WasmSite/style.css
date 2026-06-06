@@ -133,6 +133,35 @@ dd {
   font: 700 24px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.run-log {
+  height: min(320px, 45vh);
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 16px;
+  padding: 14px;
+  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.log-entry {
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 8%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.log-entry:last-child {
+  border-bottom: 0;
+}
+
+.log-entry.muted {
+  opacity: 0.65;
+}
+
+.log-entry.error {
+  color: #c21f39;
+  font-weight: 700;
+}
+
 pre {
   margin: 0;
   white-space: pre-wrap;
