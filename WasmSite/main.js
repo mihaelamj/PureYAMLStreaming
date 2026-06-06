@@ -523,24 +523,32 @@ async function copyRunLog() {
   if (!text) {
     return;
   }
-  if ("clipboard" in navigator && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-  } else {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
+  try {
+    if ("clipboard" in navigator && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      copyTextWithTextarea(text);
+    }
+  } catch {
+    copyTextWithTextarea(text);
   }
   const previousLabel = copyRunLogButton.textContent;
   copyRunLogButton.textContent = "Copied";
   window.setTimeout(() => {
     copyRunLogButton.textContent = previousLabel;
   }, 1500);
+}
+
+function copyTextWithTextarea(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 function resetStreamDocument(message) {
