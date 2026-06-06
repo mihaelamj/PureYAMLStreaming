@@ -49,7 +49,7 @@ try parser.parseDocuments(from: url) { document in
 }
 ```
 
-## WASM Browser Smoke Site
+## WASM Browser Benchmark Site
 
 Live site:
 
@@ -68,8 +68,10 @@ bash scripts/serve-wasm-site.sh
 ```
 
 Then open `http://localhost:8080` and click **Run WASM Test**. The page loads
-`pureyaml-streaming-wasm-smoke.wasm`, runs a chunked document-stream parse in
-the browser through a WASI shim, captures stdout, and renders pass/fail.
+`pureyaml-streaming-wasm-smoke.wasm`, lets you choose from 10+ public real-world
+YAML files, fetches the selected file in JavaScript, feeds the bytes to Swift
+through WASI stdin, and reports fetch time, parse time, throughput, document
+count, and stdout JSON.
 
 ## Relationship To PureYAML
 

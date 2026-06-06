@@ -4,13 +4,14 @@ import PureYAMLStreaming
 
 struct SmokeResult: Encodable {
     var ok: Bool
+    var inputByteCount: Int
     var documentCount: Int
     var firstName: String?
     var lastName: String?
     var message: String
 }
 
-let yaml = Data(
+let fallbackYAML = Data(
     """
     ---
     name: browser-0
@@ -31,25 +32,29 @@ let yaml = Data(
 )
 
 do {
-    let parser = PureYAMLStreaming.Parser(chunkSize: 7)
+    let input = CommandLine.arguments.count > 1
+        ? FileHandle.standardInput.readDataToEndOfFile()
+        : Data()
+    let yaml = input.isEmpty ? fallbackYAML : input
+    let parser = PureYAMLStreaming.Parser(chunkSize: 31)
     let documents = try parser.collectDocuments(data: yaml)
     let names = documents.compactMap { document in
         stringValue("name", in: document.value)
     }
-    let ok = documents.count == 3
-        && names.first == "browser-0"
-        && names.last == "browser-2"
+    let ok = !documents.isEmpty
     let result = SmokeResult(
         ok: ok,
+        inputByteCount: yaml.count,
         documentCount: documents.count,
         firstName: names.first,
         lastName: names.last,
-        message: ok ? "PureYAMLStreaming WASM smoke passed" : "PureYAMLStreaming WASM smoke failed",
+        message: ok ? "PureYAMLStreaming WASM parse passed" : "PureYAMLStreaming WASM parse found no documents",
     )
     print(try renderJSON(result))
 } catch {
     let result = SmokeResult(
         ok: false,
+        inputByteCount: 0,
         documentCount: 0,
         firstName: nil,
         lastName: nil,

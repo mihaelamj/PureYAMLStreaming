@@ -3,26 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PureYAMLStreaming WASM Smoke</title>
+    <title>PureYAMLStreaming WASM Benchmark</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main>
       <section class="card">
         <p class="eyebrow">PureYAMLStreaming</p>
-        <h1>WASM Streaming Smoke Test</h1>
+        <h1>Live WASM YAML Benchmark</h1>
         <p>
-          This page loads the Swift WASI build in the browser, runs a
-          document-streaming parse, captures stdout, and reports whether the
-          smoke test passed.
+          Pick a public real-world YAML file. The browser fetches it, feeds the
+          bytes to the Swift WASI executable through stdin, and times the
+          document-streaming parse live.
         </p>
-        <button id="runButton" type="button">Run WASM Test</button>
+        <label for="sampleSelect">Public YAML example</label>
+        <select id="sampleSelect"></select>
+        <label for="urlInput">URL</label>
+        <input id="urlInput" type="url" autocomplete="off" />
+        <button id="runButton" type="button">Run Benchmark</button>
         <div id="status" class="status idle">Idle</div>
       </section>
 
       <section class="card">
+        <h2>Timing</h2>
+        <dl class="metrics">
+          <div>
+            <dt>Bytes</dt>
+            <dd id="bytesMetric">-</dd>
+          </div>
+          <div>
+            <dt>Fetch</dt>
+            <dd id="fetchMetric">-</dd>
+          </div>
+          <div>
+            <dt>Swift parse</dt>
+            <dd id="parseMetric">-</dd>
+          </div>
+          <div>
+            <dt>Throughput</dt>
+            <dd id="throughputMetric">-</dd>
+          </div>
+          <div>
+            <dt>Documents</dt>
+            <dd id="documentsMetric">-</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="card">
         <h2>Output</h2>
-        <pre id="output">Click "Run WASM Test".</pre>
+        <pre id="output">Pick a YAML file and click "Run Benchmark".</pre>
       </section>
     </main>
 

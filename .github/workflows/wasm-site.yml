@@ -76,6 +76,7 @@ jobs:
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
             await page.goto('http://127.0.0.1:8766/?v=' + Date.now());
+            await page.selectOption('#sampleSelect', { index: 4 });
             await page.click('#runButton');
             await page.waitForFunction(
               () => document.querySelector('#status')?.textContent === 'Passed',
@@ -83,8 +84,12 @@ jobs:
               { timeout: 60000 }
             );
             const output = await page.locator('#output').textContent();
+            const throughput = await page.locator('#throughputMetric').textContent();
             if (!output.includes('"ok" : true') && !output.includes('"ok":true')) {
               throw new Error(output);
+            }
+            if (!throughput.includes('/s')) {
+              throw new Error(`Expected throughput metric, got: ${throughput}`);
             }
             await browser.close();
           })();
