@@ -12,6 +12,8 @@ const urlInput = document.querySelector("#urlInput");
 const statusElement = document.querySelector("#status");
 const outputElement = document.querySelector("#output");
 const runLogElement = document.querySelector("#runLog");
+const copyRunLogButton = document.querySelector("#copyRunLogButton");
+const streamDocumentElement = document.querySelector("#streamDocument");
 const isolationMetric = document.querySelector("#isolationMetric");
 const sabMetric = document.querySelector("#sabMetric");
 const workerMetric = document.querySelector("#workerMetric");
@@ -110,6 +112,12 @@ streamButton.addEventListener("click", () => {
   });
 });
 
+copyRunLogButton.addEventListener("click", () => {
+  copyRunLog().catch((error) => {
+    logStep(`Unable to copy run log: ${String(error?.message || error)}`, "error");
+  });
+});
+
 sampleSelect.addEventListener("change", () => {
   urlInput.value = sampleSelect.value;
 });
@@ -129,6 +137,7 @@ async function runBenchmark() {
   outputElement.textContent = "";
   resetMetrics();
   resetLog();
+  resetStreamDocument("Waiting for buffered YAML fetch to complete.");
   logStep("Queued benchmark run.");
   logStep(`Selected source: ${sourceURL}`);
 
@@ -147,6 +156,7 @@ async function runBenchmark() {
   }
   const yamlBytes = new Uint8Array(await response.arrayBuffer());
   const fetchMS = performance.now() - fetchStart;
+  replaceStreamDocument(decodeYAMLBytes(yamlBytes));
   logStep(`Fetched HTTP ${response.status}, ${formatBytes(yamlBytes.byteLength)} in ${formatDuration(fetchMS)}.`);
   logStep("Handing buffered response to SwiftWASIHTTPClient.HostHTTPClient through WASI stdin.");
 
@@ -239,6 +249,7 @@ async function runStreamingBenchmark() {
   outputElement.textContent = "";
   resetMetrics();
   resetLog();
+  resetStreamDocument("Waiting for streaming YAML chunks.");
   logStep("Queued true browser-to-WASI streaming run.");
   logStep(`Selected source: ${sourceURL}`);
 
@@ -295,6 +306,7 @@ async function runStreamingBenchmark() {
 
   logStep(`Streaming HTTP ${response.status} response body into SharedArrayBuffer.`);
   const reader = response.body.getReader();
+  const documentDecoder = new TextDecoder();
   let networkChunkCount = 0;
   let fetchedByteCount = 0;
   try {
@@ -305,6 +317,7 @@ async function runStreamingBenchmark() {
       }
       networkChunkCount += 1;
       fetchedByteCount += value.byteLength;
+      appendStreamDocumentChunk(documentDecoder.decode(value, { stream: true }));
       await writeToRingBuffer(value, control, bytes);
       logStep(`Network chunk ${networkChunkCount}: wrote ${formatBytes(value.byteLength)} to ring buffer.`);
     }
@@ -315,6 +328,7 @@ async function runStreamingBenchmark() {
     worker?.terminate();
     throw error;
   }
+  appendStreamDocumentChunk(documentDecoder.decode());
   Atomics.store(control, streamControlIndex.closed, 1);
   wakeRingBuffer(control);
   const fetchMS = performance.now() - fetchStart;
@@ -502,6 +516,131 @@ function resetMetrics() {
   parseMetric.textContent = "-";
   throughputMetric.textContent = "-";
   documentsMetric.textContent = "-";
+}
+
+async function copyRunLog() {
+  const text = runLogElement.innerText.trim();
+  if (!text) {
+    return;
+  }
+  if ("clipboard" in navigator && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  const previousLabel = copyRunLogButton.textContent;
+  copyRunLogButton.textContent = "Copied";
+  window.setTimeout(() => {
+    copyRunLogButton.textContent = previousLabel;
+  }, 1500);
+}
+
+function resetStreamDocument(message) {
+  streamDocumentElement.replaceChildren(document.createTextNode(message));
+  streamDocumentElement.scrollTop = 0;
+}
+
+function replaceStreamDocument(text) {
+  streamDocumentElement.replaceChildren(renderYAMLSyntax(text || "(empty document)"));
+  streamDocumentElement.scrollTop = 0;
+}
+
+function appendStreamDocumentChunk(text) {
+  if (!text) {
+    return;
+  }
+  if (streamDocumentElement.childNodes.length === 1 && streamDocumentElement.textContent.startsWith("Waiting for")) {
+    streamDocumentElement.replaceChildren();
+  }
+  streamDocumentElement.append(renderYAMLSyntax(text));
+  streamDocumentElement.scrollTop = streamDocumentElement.scrollHeight;
+}
+
+function decodeYAMLBytes(bytes) {
+  return new TextDecoder().decode(bytes);
+}
+
+function renderYAMLSyntax(text) {
+  const fragment = document.createDocumentFragment();
+  for (const segment of text.split(/(\r?\n)/)) {
+    if (segment === "\n" || segment === "\r\n") {
+      fragment.append(document.createTextNode(segment));
+    } else {
+      renderYAMLLine(segment, fragment);
+    }
+  }
+  return fragment;
+}
+
+function renderYAMLLine(line, fragment) {
+  const commentIndex = findYAMLCommentIndex(line);
+  const source = commentIndex >= 0 ? line.slice(0, commentIndex) : line;
+  const comment = commentIndex >= 0 ? line.slice(commentIndex) : "";
+  const keyMatch = source.match(/^(\s*(?:-\s*)?)([A-Za-z0-9_.-]+)(\s*:)(.*)$/);
+  if (source.trim() === "---" || source.trim() === "...") {
+    appendSyntaxSpan(fragment, source, "yaml-marker");
+  } else if (keyMatch) {
+    fragment.append(document.createTextNode(keyMatch[1]));
+    appendSyntaxSpan(fragment, keyMatch[2], "yaml-key");
+    appendSyntaxSpan(fragment, keyMatch[3], "yaml-punctuation");
+    appendYAMLValue(fragment, keyMatch[4]);
+  } else {
+    appendYAMLValue(fragment, source);
+  }
+  if (comment) {
+    appendSyntaxSpan(fragment, comment, "yaml-comment");
+  }
+}
+
+function appendYAMLValue(fragment, value) {
+  const trimmed = value.trim();
+  const leading = value.slice(0, value.length - value.trimStart().length);
+  const trailingStart = value.length - value.trimEnd().length;
+  const trailing = trailingStart > 0 ? value.slice(value.length - trailingStart) : "";
+  if (leading) {
+    fragment.append(document.createTextNode(leading));
+  }
+  if (/^(true|false|null|~)$/i.test(trimmed)) {
+    appendSyntaxSpan(fragment, trimmed, "yaml-literal");
+  } else if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+    appendSyntaxSpan(fragment, trimmed, "yaml-number");
+  } else if (/^(['"]).*\1$/.test(trimmed)) {
+    appendSyntaxSpan(fragment, trimmed, "yaml-string");
+  } else {
+    fragment.append(document.createTextNode(trimmed));
+  }
+  if (trailing) {
+    fragment.append(document.createTextNode(trailing));
+  }
+}
+
+function appendSyntaxSpan(fragment, text, className) {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  fragment.append(span);
+}
+
+function findYAMLCommentIndex(line) {
+  let quote = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if ((character === "'" || character === "\"") && line[index - 1] !== "\\") {
+      quote = quote === character ? null : quote || character;
+    }
+    if (character === "#" && quote === null && (index === 0 || /\s/.test(line[index - 1]))) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function formatDuration(milliseconds) {

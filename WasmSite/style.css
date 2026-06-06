@@ -90,9 +90,28 @@ button {
   color: CanvasText;
 }
 
+.secondary-button {
+  margin-top: 0;
+  border: 1px solid CanvasText;
+  background: Canvas;
+  color: CanvasText;
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.section-header h2 {
+  margin-bottom: 0;
 }
 
 .status {
@@ -155,6 +174,45 @@ dd {
   padding: 14px;
   background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.stream-document {
+  height: min(420px, 55vh);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 16px;
+  padding: 14px;
+  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.yaml-key {
+  color: #4f8cff;
+  font-weight: 700;
+}
+
+.yaml-punctuation,
+.yaml-marker {
+  color: #b66cff;
+  font-weight: 700;
+}
+
+.yaml-comment {
+  color: #708090;
+  font-style: italic;
+}
+
+.yaml-string {
+  color: #138a36;
+}
+
+.yaml-number {
+  color: #b36b00;
+}
+
+.yaml-literal {
+  color: #c21f39;
+  font-weight: 700;
 }
 
 .log-entry {

@@ -76,15 +76,28 @@
       </section>
 
       <section class="card">
-        <h2>Run Log</h2>
+        <div class="section-header">
+          <h2>Run Log</h2>
+          <button id="copyRunLogButton" class="secondary-button" type="button">Copy Run Log</button>
+        </div>
         <div id="runLog" class="run-log" role="log" aria-live="polite">
           <div class="log-entry muted">Waiting for benchmark run.</div>
         </div>
       </section>
 
       <section class="card">
+        <h2>Document Stream</h2>
+        <p>
+          In true streaming mode this panel appends decoded YAML chunks as the
+          browser receives them. In buffered mode it shows the fetched body after
+          the browser buffer is complete.
+        </p>
+        <pre id="streamDocument" class="stream-document">Waiting for YAML bytes.</pre>
+      </section>
+
+      <section class="card">
         <h2>Output</h2>
-        <pre id="output">Pick a YAML file and click "Run Benchmark".</pre>
+        <pre id="output">Pick a YAML file and choose a benchmark mode.</pre>
       </section>
     </main>
 

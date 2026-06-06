@@ -136,6 +136,7 @@ jobs:
             const throughput = await page.locator('#throughputMetric').textContent();
             const documents = await page.locator('#documentsMetric').textContent();
             const runLog = await page.locator('#runLog').textContent();
+            const streamDocument = await page.locator('#streamDocument').textContent();
             const parsed = parsedStdout(output);
             if (parsed.ok !== true) throw new Error(output);
             if (parsed.transport !== 'SwiftWASIHTTPClient.HostHTTPClient') throw new Error(output);
@@ -170,6 +171,18 @@ jobs:
             if (!runLog.includes('Fetching YAML bytes') || !runLog.includes('SwiftWASIHTTPClient.HostHTTPClient') || !runLog.includes('Starting Swift parser.') || !runLog.includes('ChunkedUTF8Reader consumed') || !runLog.includes('Benchmark completed successfully.')) {
               throw new Error(`Expected detailed run log, got: ${runLog}`);
             }
+            if (!streamDocument.includes('name: ci-doc-0') || !streamDocument.includes('name: ci-doc-2999')) {
+              throw new Error('Expected buffered document panel to show generated YAML');
+            }
+            if (await page.locator('#streamDocument .yaml-key').count() < 3) {
+              throw new Error('Expected buffered document panel syntax highlighting');
+            }
+            await page.click('#copyRunLogButton');
+            await page.waitForFunction(
+              () => document.querySelector('#copyRunLogButton')?.textContent === 'Copied',
+              null,
+              { timeout: 5000 }
+            );
 
             await page.click('#streamButton');
             await page.waitForFunction(
@@ -179,6 +192,7 @@ jobs:
             );
             const streamingOutput = await page.locator('#output').textContent();
             const streamingRunLog = await page.locator('#runLog').textContent();
+            const streamingDocument = await page.locator('#streamDocument').textContent();
             const streamingParsed = parsedStdout(streamingOutput);
             if (streamingParsed.ok !== true) throw new Error(streamingOutput);
             if (streamingParsed.transport !== 'SharedArrayBuffer fd_read stdin') throw new Error(streamingOutput);
@@ -194,6 +208,12 @@ jobs:
             }
             if (!streamingRunLog.includes('Streaming HTTP 200 response body into SharedArrayBuffer') || !streamingRunLog.includes('Network chunk') || !streamingRunLog.includes('Worker fd_read calls') || !streamingRunLog.includes('SharedArrayBuffer fd_read stdin')) {
               throw new Error(`Expected true streaming run log, got: ${streamingRunLog}`);
+            }
+            if (!streamingDocument.includes('name: ci-doc-0') || !streamingDocument.includes('name: ci-doc-2999')) {
+              throw new Error('Expected streaming document panel to append generated YAML');
+            }
+            if (await page.locator('#streamDocument .yaml-key').count() < 3) {
+              throw new Error('Expected streaming document panel syntax highlighting');
             }
             await browser.close();
           })();
@@ -271,6 +291,7 @@ jobs:
             const output = await page.locator('#output').textContent();
             const throughput = await page.locator('#throughputMetric').textContent();
             const runLog = await page.locator('#runLog').textContent();
+            const streamDocument = await page.locator('#streamDocument').textContent();
             const parsed = parsedStdout(output);
             if (parsed.transport !== 'SwiftWASIHTTPClient.HostHTTPClient') throw new Error(output);
             if (parsed.httpStatusCode !== 200) throw new Error(output);
@@ -298,6 +319,12 @@ jobs:
             if (!runLog.includes('Fetching YAML bytes') || !runLog.includes('SwiftWASIHTTPClient.HostHTTPClient') || !runLog.includes('Starting Swift parser.') || !runLog.includes('ChunkedUTF8Reader consumed') || !runLog.includes('Benchmark completed successfully.')) {
               throw new Error(`Expected live detailed run log, got: ${runLog}`);
             }
+            if (!streamDocument.includes('name: ci-doc-0') || !streamDocument.includes('name: ci-doc-2999')) {
+              throw new Error('Expected live buffered document panel to show generated YAML');
+            }
+            if (await page.locator('#streamDocument .yaml-key').count() < 3) {
+              throw new Error('Expected live buffered document panel syntax highlighting');
+            }
             await page.click('#streamButton');
             await page.waitForFunction(
               () => document.querySelector('#status')?.textContent === 'Passed',
@@ -306,6 +333,7 @@ jobs:
             );
             const streamingOutput = await page.locator('#output').textContent();
             const streamingRunLog = await page.locator('#runLog').textContent();
+            const streamingDocument = await page.locator('#streamDocument').textContent();
             const streamingParsed = parsedStdout(streamingOutput);
             if (streamingParsed.transport !== 'SharedArrayBuffer fd_read stdin') throw new Error(streamingOutput);
             if (streamingParsed.httpStatusCode !== 200) throw new Error(streamingOutput);
@@ -317,6 +345,12 @@ jobs:
             }
             if (!streamingRunLog.includes('Streaming HTTP 200 response body into SharedArrayBuffer') || !streamingRunLog.includes('Network chunk') || !streamingRunLog.includes('Worker fd_read calls') || !streamingRunLog.includes('SharedArrayBuffer fd_read stdin')) {
               throw new Error(`Expected live true streaming run log, got: ${streamingRunLog}`);
+            }
+            if (!streamingDocument.includes('name: ci-doc-0') || !streamingDocument.includes('name: ci-doc-2999')) {
+              throw new Error('Expected live streaming document panel to append generated YAML');
+            }
+            if (await page.locator('#streamDocument .yaml-key').count() < 3) {
+              throw new Error('Expected live streaming document panel syntax highlighting');
             }
             await browser.close();
           })();
