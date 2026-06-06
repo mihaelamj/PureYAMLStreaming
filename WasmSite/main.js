@@ -6,11 +6,16 @@ import {
 } from "./vendor/browser_wasi_shim/index.js";
 
 const runButton = document.querySelector("#runButton");
+const streamButton = document.querySelector("#streamButton");
 const sampleSelect = document.querySelector("#sampleSelect");
 const urlInput = document.querySelector("#urlInput");
 const statusElement = document.querySelector("#status");
 const outputElement = document.querySelector("#output");
 const runLogElement = document.querySelector("#runLog");
+const isolationMetric = document.querySelector("#isolationMetric");
+const sabMetric = document.querySelector("#sabMetric");
+const workerMetric = document.querySelector("#workerMetric");
+const modeMetric = document.querySelector("#modeMetric");
 const bytesMetric = document.querySelector("#bytesMetric");
 const fetchMetric = document.querySelector("#fetchMetric");
 const parseMetric = document.querySelector("#parseMetric");
@@ -20,6 +25,19 @@ const params = new URLSearchParams(location.search);
 const wasmURL = params.get("wasm") || "./pureyaml-streaming-wasm-smoke.wasm.gz";
 let modulePromise = null;
 let runStartedAt = performance.now();
+const streamControlIndex = {
+  read: 0,
+  write: 1,
+  available: 2,
+  closed: 3,
+  error: 4,
+  sequence: 5,
+  totalWritten: 6,
+  readCalls: 7,
+  waitCount: 8,
+};
+const streamControlCount = 16;
+const streamBufferCapacity = 1024 * 1024;
 
 const samples = [
   {
@@ -86,9 +104,17 @@ runButton.addEventListener("click", () => {
   });
 });
 
+streamButton.addEventListener("click", () => {
+  runStreamingBenchmark().catch((error) => {
+    renderFailure(error);
+  });
+});
+
 sampleSelect.addEventListener("change", () => {
   urlInput.value = sampleSelect.value;
 });
+
+updateStreamingCapabilities();
 
 async function runBenchmark() {
   const sourceURL = urlInput.value.trim();
@@ -97,6 +123,7 @@ async function runBenchmark() {
   }
 
   runButton.disabled = true;
+  streamButton.disabled = true;
   statusElement.className = "status idle";
   statusElement.textContent = "Preparing...";
   outputElement.textContent = "";
@@ -112,7 +139,7 @@ async function runBenchmark() {
   logStep(`WASM module ready in ${formatDuration(moduleLoadMS)}.`);
 
   statusElement.textContent = "Fetching YAML...";
-  logStep("Fetching YAML bytes.");
+  logStep("Fetching YAML bytes in the browser. This fetch is buffered before WASI starts.");
   const fetchStart = performance.now();
   const response = await fetch(sourceURL, { cache: "no-store" });
   if (!response.ok) {
@@ -120,7 +147,8 @@ async function runBenchmark() {
   }
   const yamlBytes = new Uint8Array(await response.arrayBuffer());
   const fetchMS = performance.now() - fetchStart;
-  logStep(`Fetched ${formatBytes(yamlBytes.byteLength)} in ${formatDuration(fetchMS)}.`);
+  logStep(`Fetched HTTP ${response.status}, ${formatBytes(yamlBytes.byteLength)} in ${formatDuration(fetchMS)}.`);
+  logStep("Handing buffered response to SwiftWASIHTTPClient.HostHTTPClient through WASI stdin.");
 
   logStep("Preparing WASI file descriptors.");
   let stdoutText = "";
@@ -135,7 +163,7 @@ async function runBenchmark() {
     }),
   ];
   logStep("Creating WASI instance.");
-  const wasi = new WASI(["pureyaml-streaming-wasm-smoke", sourceURL], [], fds);
+  const wasi = new WASI(["pureyaml-streaming-wasm-smoke", sourceURL, String(response.status)], [], fds);
   statusElement.textContent = "Running Swift parser...";
   logStep("Starting Swift parser. The browser tab can pause while WebAssembly is executing.");
   await nextPaint();
@@ -157,7 +185,16 @@ async function runBenchmark() {
   }
   const parseMS = parsed.parseMilliseconds;
   const throughput = parseMS > 0 ? yamlBytes.byteLength / (parseMS / 1000) : 0;
+  if (!Number.isFinite(parsed?.chunkCount) || !Number.isFinite(parsed?.chunkSize)) {
+    throw new Error("WASM output did not include finite Swift chunk instrumentation.");
+  }
+  logStep(`Swift transport: ${parsed.transport || "unknown"}; HTTP status: ${parsed.httpStatusCode ?? "n/a"}.`);
   logStep(`Swift parse reported ${formatDuration(parseMS)}.`);
+  logStep(
+    `Swift ChunkedUTF8Reader consumed ${parsed.chunkCount} chunk(s) at chunkSize ${formatBytes(parsed.chunkSize)}.`,
+  );
+  logStep(`Largest Swift chunk observed: ${formatBytes(parsed.maxChunkByteCount ?? 0)}.`);
+  logStep(`Document scanner emitted ${parsed.scannerDocumentSourceCount ?? 0} document source(s).`);
   logStep(`Parsed ${parsed.documentCount ?? 0} document(s).`);
   logStep(`Throughput: ${formatBytes(throughput)}/s.`);
 
@@ -183,7 +220,217 @@ async function runBenchmark() {
     stderrText || "(empty)",
   ].join("\n");
   logStep(ok ? "Benchmark completed successfully." : "Benchmark finished with parser failure.");
-  runButton.disabled = false;
+  resetButtons();
+}
+
+async function runStreamingBenchmark() {
+  const sourceURL = urlInput.value.trim();
+  if (!sourceURL) {
+    throw new Error("Choose or enter a YAML URL first.");
+  }
+  if (!streamingSupported()) {
+    throw new Error("True streaming mode requires cross-origin isolation, SharedArrayBuffer, Worker, and Atomics.wait.");
+  }
+
+  runButton.disabled = true;
+  streamButton.disabled = true;
+  statusElement.className = "status idle";
+  statusElement.textContent = "Streaming...";
+  outputElement.textContent = "";
+  resetMetrics();
+  resetLog();
+  logStep("Queued true browser-to-WASI streaming run.");
+  logStep(`Selected source: ${sourceURL}`);
+
+  const sharedBuffer = new SharedArrayBuffer(
+    streamControlCount * Int32Array.BYTES_PER_ELEMENT + streamBufferCapacity,
+  );
+  const control = new Int32Array(sharedBuffer, 0, streamControlCount);
+  const bytes = new Uint8Array(sharedBuffer, streamControlCount * Int32Array.BYTES_PER_ELEMENT, streamBufferCapacity);
+  let worker = null;
+  let stdoutText = "";
+  let stderrText = "";
+  let workerDone;
+  const workerDonePromise = new Promise((resolve, reject) => {
+    workerDone = { resolve, reject };
+  });
+
+  logStep("Starting Worker-owned WASI runtime.");
+  const fetchStart = performance.now();
+  const response = await fetch(sourceURL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch YAML: HTTP ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error("This browser did not expose a ReadableStream response body.");
+  }
+
+  worker = new Worker("./stream-worker.js", { type: "module" });
+  worker.addEventListener("message", (event) => {
+    const message = event.data || {};
+    if (message.type === "log") {
+      logStep(message.message);
+    } else if (message.type === "stdout") {
+      stdoutText += `${message.line}\n`;
+    } else if (message.type === "stderr") {
+      stderrText += `${message.line}\n`;
+    } else if (message.type === "done") {
+      stdoutText = message.stdoutText;
+      stderrText = message.stderrText;
+      logStep(`Worker fd_read calls: ${message.readCalls}; ring-buffer waits: ${message.waitCount}.`);
+      workerDone.resolve(message);
+    } else if (message.type === "error") {
+      workerDone.reject(new Error(message.message));
+    }
+  });
+
+  worker.postMessage({
+    type: "start",
+    wasmURL,
+    sourceURL,
+    statusCode: response.status,
+    sharedBuffer,
+    capacity: streamBufferCapacity,
+  });
+
+  logStep(`Streaming HTTP ${response.status} response body into SharedArrayBuffer.`);
+  const reader = response.body.getReader();
+  let networkChunkCount = 0;
+  let fetchedByteCount = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      networkChunkCount += 1;
+      fetchedByteCount += value.byteLength;
+      await writeToRingBuffer(value, control, bytes);
+      logStep(`Network chunk ${networkChunkCount}: wrote ${formatBytes(value.byteLength)} to ring buffer.`);
+    }
+  } catch (error) {
+    Atomics.store(control, streamControlIndex.error, 1);
+    Atomics.store(control, streamControlIndex.closed, 1);
+    wakeRingBuffer(control);
+    worker?.terminate();
+    throw error;
+  }
+  Atomics.store(control, streamControlIndex.closed, 1);
+  wakeRingBuffer(control);
+  const fetchMS = performance.now() - fetchStart;
+  logStep(`Network stream finished: ${networkChunkCount} chunk(s), ${formatBytes(fetchedByteCount)} in ${formatDuration(fetchMS)}.`);
+
+  let workerResult;
+  try {
+    workerResult = await workerDonePromise;
+  } catch (error) {
+    worker?.terminate();
+    throw error;
+  }
+  worker?.terminate();
+  renderBenchmarkResult({
+    sourceURL,
+    moduleLoadMS: workerResult.moduleLoadMS,
+    fetchMS,
+    wallClockParseMS: workerResult.processWallClockMS,
+    stdoutText,
+    stderrText,
+    inputByteCount: fetchedByteCount,
+    workerResult,
+    modeLabel: "true streaming",
+  });
+}
+
+function renderBenchmarkResult({
+  sourceURL,
+  moduleLoadMS,
+  fetchMS,
+  wallClockParseMS,
+  stdoutText,
+  stderrText,
+  inputByteCount,
+  modeLabel,
+}) {
+  logStep("Parsing Swift JSON result from stdout.");
+  const parsed = parseSmokeOutput(stdoutText);
+  const ok = parsed?.ok === true;
+  if (!Number.isFinite(parsed?.parseMilliseconds)) {
+    throw new Error("WASM output did not include a finite Swift parseMilliseconds value.");
+  }
+  const parseMS = parsed.parseMilliseconds;
+  const throughput = parseMS > 0 ? inputByteCount / (parseMS / 1000) : 0;
+  if (!Number.isFinite(parsed?.chunkCount) || !Number.isFinite(parsed?.chunkSize)) {
+    throw new Error("WASM output did not include finite Swift chunk instrumentation.");
+  }
+  logStep(`Swift transport: ${parsed.transport || "unknown"}; HTTP status: ${parsed.httpStatusCode ?? "n/a"}.`);
+  logStep(`Swift parse reported ${formatDuration(parseMS)}.`);
+  logStep(
+    `Swift ChunkedUTF8Reader consumed ${parsed.chunkCount} chunk(s) at chunkSize ${formatBytes(parsed.chunkSize)}.`,
+  );
+  logStep(`Largest Swift chunk observed: ${formatBytes(parsed.maxChunkByteCount ?? 0)}.`);
+  logStep(`Document scanner emitted ${parsed.scannerDocumentSourceCount ?? 0} document source(s).`);
+  logStep(`Swift stdin read calls: ${parsed.stdinReadCount ?? "n/a"}; max stdin read: ${formatBytes(parsed.maxStdinReadByteCount ?? 0)}.`);
+  logStep(`Parsed ${parsed.documentCount ?? 0} document(s).`);
+  logStep(`Throughput: ${formatBytes(throughput)}/s.`);
+
+  statusElement.className = ok ? "status pass" : "status fail";
+  statusElement.textContent = ok ? "Passed" : "Failed";
+  bytesMetric.textContent = formatBytes(inputByteCount);
+  fetchMetric.textContent = formatDuration(fetchMS);
+  parseMetric.textContent = formatDuration(parseMS);
+  throughputMetric.textContent = `${formatBytes(throughput)}/s`;
+  documentsMetric.textContent = parsed?.documentCount ?? "-";
+  outputElement.textContent = [
+    `url: ${sourceURL}`,
+    `mode: ${modeLabel}`,
+    `moduleLoad: ${formatDuration(moduleLoadMS)}`,
+    `fetch: ${formatDuration(fetchMS)}`,
+    `swiftParse: ${formatDuration(parseMS)}`,
+    `processWallClock: ${formatDuration(wallClockParseMS)}`,
+    `throughput: ${formatBytes(throughput)}/s`,
+    "",
+    "stdout:",
+    stdoutText || "(empty)",
+    "",
+    "stderr:",
+    stderrText || "(empty)",
+  ].join("\n");
+  logStep(ok ? "Benchmark completed successfully." : "Benchmark finished with parser failure.");
+  resetButtons();
+}
+
+async function writeToRingBuffer(chunk, control, bytes) {
+  let offset = 0;
+  while (offset < chunk.byteLength) {
+    const available = Atomics.load(control, streamControlIndex.available);
+    if (available >= streamBufferCapacity) {
+      logStep("Ring buffer full; fetch pump waiting for Worker fd_read to resume.", "muted");
+      await waitForRingSpace(control);
+      logStep("Ring buffer has capacity again; fetch pump resumed.", "muted");
+      continue;
+    }
+
+    const write = Atomics.load(control, streamControlIndex.write);
+    const space = streamBufferCapacity - available;
+    const byteCount = Math.min(chunk.byteLength - offset, space, streamBufferCapacity - write);
+    bytes.set(chunk.subarray(offset, offset + byteCount), write);
+    Atomics.store(control, streamControlIndex.write, (write + byteCount) % streamBufferCapacity);
+    Atomics.add(control, streamControlIndex.available, byteCount);
+    Atomics.add(control, streamControlIndex.totalWritten, byteCount);
+    offset += byteCount;
+    wakeRingBuffer(control);
+  }
+}
+
+async function waitForRingSpace(control) {
+  while (Atomics.load(control, streamControlIndex.available) >= streamBufferCapacity) {
+    await new Promise((resolve) => setTimeout(resolve, 4));
+  }
+}
+
+function wakeRingBuffer(control) {
+  Atomics.add(control, streamControlIndex.sequence, 1);
+  Atomics.notify(control, streamControlIndex.sequence);
 }
 
 async function loadWasmModule(url) {
@@ -222,7 +469,31 @@ function renderFailure(error) {
   statusElement.textContent = "Failed";
   outputElement.textContent = String(error?.stack || error);
   logStep(`Failed: ${String(error?.message || error)}`, "error");
+  resetButtons();
+}
+
+function resetButtons() {
   runButton.disabled = false;
+  streamButton.disabled = !streamingSupported();
+}
+
+function updateStreamingCapabilities() {
+  const isolated = crossOriginIsolated === true;
+  const hasSharedArrayBuffer = "SharedArrayBuffer" in globalThis;
+  const hasWorker = "Worker" in globalThis;
+  const hasAtomicsWait = typeof Atomics?.wait === "function";
+  isolationMetric.textContent = isolated ? "yes" : "no";
+  sabMetric.textContent = hasSharedArrayBuffer ? "yes" : "no";
+  workerMetric.textContent = hasWorker && hasAtomicsWait ? "yes" : "no";
+  modeMetric.textContent = streamingSupported() ? "streaming enabled" : "buffered fallback";
+  resetButtons();
+}
+
+function streamingSupported() {
+  return crossOriginIsolated === true
+    && "SharedArrayBuffer" in globalThis
+    && "Worker" in globalThis
+    && typeof Atomics?.wait === "function";
 }
 
 function resetMetrics() {

@@ -60,6 +60,8 @@ jobs:
           mkdir -p site
           cp WasmSite/index.html site/index.html
           cp WasmSite/main.js site/main.js
+          cp WasmSite/coi-serviceworker.js site/coi-serviceworker.js
+          cp WasmSite/stream-worker.js site/stream-worker.js
           cp WasmSite/style.css site/style.css
           cp WasmSite/pureyaml-streaming-wasm-smoke.wasm.gz site/pureyaml-streaming-wasm-smoke.wasm.gz
           cp -R WasmSite/vendor site/vendor
@@ -93,13 +95,33 @@ jobs:
           node <<'NODE'
           const { chromium } = require('./.build/playwright-ci/node_modules/playwright-chromium');
 
+          async function gotoIsolated(page, url) {
+            await page.goto(url);
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+              if (await page.evaluate(() => globalThis.crossOriginIsolated === true)) {
+                return;
+              }
+              await page.waitForTimeout(500);
+              await page.reload();
+            }
+            throw new Error('Expected page to become crossOriginIsolated');
+          }
+
+          function parsedStdout(output) {
+            const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
+            return JSON.parse(stdoutMatch?.[1] || '{}');
+          }
+
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
-            await page.goto('http://127.0.0.1:8766/?v=' + Date.now());
+            await gotoIsolated(page, 'http://127.0.0.1:8766/?v=' + Date.now());
             const optionCount = await page.locator('#sampleSelect option').count();
             if (optionCount < 10) {
               throw new Error(`Expected at least 10 public YAML samples, got ${optionCount}`);
+            }
+            if (await page.locator('#streamButton').isDisabled()) {
+              throw new Error('Expected true streaming button to be enabled');
             }
             await page.fill('#urlInput', 'http://127.0.0.1:8766/fixtures/generated-large.yaml');
             await page.click('#runButton');
@@ -114,14 +136,27 @@ jobs:
             const throughput = await page.locator('#throughputMetric').textContent();
             const documents = await page.locator('#documentsMetric').textContent();
             const runLog = await page.locator('#runLog').textContent();
-            const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
-            const parsed = JSON.parse(stdoutMatch?.[1] || '{}');
+            const parsed = parsedStdout(output);
             if (parsed.ok !== true) throw new Error(output);
+            if (parsed.transport !== 'SwiftWASIHTTPClient.HostHTTPClient') throw new Error(output);
+            if (parsed.httpStatusCode !== 200) throw new Error(output);
             if (parsed.documentCount !== 3000) throw new Error(output);
             if (parsed.firstName !== 'ci-doc-0') throw new Error(output);
             if (parsed.lastName !== 'ci-doc-2999') throw new Error(output);
             if (!Number.isFinite(parsed.parseMilliseconds) || parsed.parseMilliseconds <= 0) {
               throw new Error(`Expected positive parseMilliseconds, got ${parsed.parseMilliseconds}`);
+            }
+            if (!Number.isFinite(parsed.chunkCount) || parsed.chunkCount <= 1) {
+              throw new Error(`Expected multiple Swift chunks, got ${parsed.chunkCount}`);
+            }
+            if (parsed.chunkSize !== 31) {
+              throw new Error(`Expected chunkSize 31, got ${parsed.chunkSize}`);
+            }
+            if (parsed.maxChunkByteCount > parsed.chunkSize) {
+              throw new Error(`Expected max chunk <= chunkSize, got ${parsed.maxChunkByteCount}`);
+            }
+            if (parsed.scannerDocumentSourceCount !== 3000) {
+              throw new Error(`Expected scanner to emit 3000 sources, got ${parsed.scannerDocumentSourceCount}`);
             }
             if (documents !== '3000') {
               throw new Error(`Expected document metric 3000, got: ${documents}`);
@@ -132,8 +167,33 @@ jobs:
             if (!throughput.includes('/s')) {
               throw new Error(`Expected throughput metric, got: ${throughput}`);
             }
-            if (!runLog.includes('Fetching YAML bytes.') || !runLog.includes('Starting Swift parser.') || !runLog.includes('Benchmark completed successfully.')) {
+            if (!runLog.includes('Fetching YAML bytes') || !runLog.includes('SwiftWASIHTTPClient.HostHTTPClient') || !runLog.includes('Starting Swift parser.') || !runLog.includes('ChunkedUTF8Reader consumed') || !runLog.includes('Benchmark completed successfully.')) {
               throw new Error(`Expected detailed run log, got: ${runLog}`);
+            }
+
+            await page.click('#streamButton');
+            await page.waitForFunction(
+              () => document.querySelector('#status')?.textContent === 'Passed',
+              null,
+              { timeout: 60000 }
+            );
+            const streamingOutput = await page.locator('#output').textContent();
+            const streamingRunLog = await page.locator('#runLog').textContent();
+            const streamingParsed = parsedStdout(streamingOutput);
+            if (streamingParsed.ok !== true) throw new Error(streamingOutput);
+            if (streamingParsed.transport !== 'SharedArrayBuffer fd_read stdin') throw new Error(streamingOutput);
+            if (streamingParsed.httpStatusCode !== 200) throw new Error(streamingOutput);
+            if (streamingParsed.documentCount !== 3000) throw new Error(streamingOutput);
+            if (streamingParsed.firstName !== 'ci-doc-0') throw new Error(streamingOutput);
+            if (streamingParsed.lastName !== 'ci-doc-2999') throw new Error(streamingOutput);
+            if (!Number.isFinite(streamingParsed.stdinReadCount) || streamingParsed.stdinReadCount <= 1) {
+              throw new Error(`Expected multiple stdin reads, got ${streamingParsed.stdinReadCount}`);
+            }
+            if (streamingParsed.maxStdinReadByteCount > streamingParsed.chunkSize) {
+              throw new Error(`Expected max stdin read <= chunkSize, got ${streamingParsed.maxStdinReadByteCount}`);
+            }
+            if (!streamingRunLog.includes('Streaming HTTP 200 response body into SharedArrayBuffer') || !streamingRunLog.includes('Network chunk') || !streamingRunLog.includes('Worker fd_read calls') || !streamingRunLog.includes('SharedArrayBuffer fd_read stdin')) {
+              throw new Error(`Expected true streaming run log, got: ${streamingRunLog}`);
             }
             await browser.close();
           })();
@@ -179,11 +239,28 @@ jobs:
           node <<'NODE'
           const { chromium } = require('./.build/playwright-live/node_modules/playwright-chromium');
 
+          async function gotoIsolated(page, url) {
+            await page.goto(url);
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+              if (await page.evaluate(() => globalThis.crossOriginIsolated === true)) {
+                return;
+              }
+              await page.waitForTimeout(500);
+              await page.reload();
+            }
+            throw new Error('Expected live page to become crossOriginIsolated');
+          }
+
+          function parsedStdout(output) {
+            const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
+            return JSON.parse(stdoutMatch?.[1] || '{}');
+          }
+
           (async () => {
             const pageURL = process.env.PAGE_URL;
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
-            await page.goto(pageURL + '?v=' + Date.now());
+            await gotoIsolated(page, pageURL + '?v=' + Date.now());
             await page.fill('#urlInput', new URL('fixtures/generated-large.yaml', pageURL).href);
             await page.click('#runButton');
             await page.waitForFunction(
@@ -194,19 +271,52 @@ jobs:
             const output = await page.locator('#output').textContent();
             const throughput = await page.locator('#throughputMetric').textContent();
             const runLog = await page.locator('#runLog').textContent();
-            const stdoutMatch = output.match(/stdout:\n([\s\S]*?)\n\nstderr:/);
-            const parsed = JSON.parse(stdoutMatch?.[1] || '{}');
+            const parsed = parsedStdout(output);
+            if (parsed.transport !== 'SwiftWASIHTTPClient.HostHTTPClient') throw new Error(output);
+            if (parsed.httpStatusCode !== 200) throw new Error(output);
             if (parsed.documentCount !== 3000) throw new Error(output);
             if (parsed.firstName !== 'ci-doc-0') throw new Error(output);
             if (parsed.lastName !== 'ci-doc-2999') throw new Error(output);
             if (!Number.isFinite(parsed.parseMilliseconds) || parsed.parseMilliseconds <= 0) {
               throw new Error(`Expected positive parseMilliseconds, got ${parsed.parseMilliseconds}`);
             }
+            if (!Number.isFinite(parsed.chunkCount) || parsed.chunkCount <= 1) {
+              throw new Error(`Expected multiple Swift chunks, got ${parsed.chunkCount}`);
+            }
+            if (parsed.chunkSize !== 31) {
+              throw new Error(`Expected chunkSize 31, got ${parsed.chunkSize}`);
+            }
+            if (parsed.maxChunkByteCount > parsed.chunkSize) {
+              throw new Error(`Expected max chunk <= chunkSize, got ${parsed.maxChunkByteCount}`);
+            }
+            if (parsed.scannerDocumentSourceCount !== 3000) {
+              throw new Error(`Expected scanner to emit 3000 sources, got ${parsed.scannerDocumentSourceCount}`);
+            }
             if (!throughput.includes('/s')) {
               throw new Error(`Expected live throughput metric, got: ${throughput}`);
             }
-            if (!runLog.includes('Fetching YAML bytes.') || !runLog.includes('Starting Swift parser.') || !runLog.includes('Benchmark completed successfully.')) {
+            if (!runLog.includes('Fetching YAML bytes') || !runLog.includes('SwiftWASIHTTPClient.HostHTTPClient') || !runLog.includes('Starting Swift parser.') || !runLog.includes('ChunkedUTF8Reader consumed') || !runLog.includes('Benchmark completed successfully.')) {
               throw new Error(`Expected live detailed run log, got: ${runLog}`);
+            }
+            await page.click('#streamButton');
+            await page.waitForFunction(
+              () => document.querySelector('#status')?.textContent === 'Passed',
+              null,
+              { timeout: 60000 }
+            );
+            const streamingOutput = await page.locator('#output').textContent();
+            const streamingRunLog = await page.locator('#runLog').textContent();
+            const streamingParsed = parsedStdout(streamingOutput);
+            if (streamingParsed.transport !== 'SharedArrayBuffer fd_read stdin') throw new Error(streamingOutput);
+            if (streamingParsed.httpStatusCode !== 200) throw new Error(streamingOutput);
+            if (streamingParsed.documentCount !== 3000) throw new Error(streamingOutput);
+            if (streamingParsed.firstName !== 'ci-doc-0') throw new Error(streamingOutput);
+            if (streamingParsed.lastName !== 'ci-doc-2999') throw new Error(streamingOutput);
+            if (!Number.isFinite(streamingParsed.stdinReadCount) || streamingParsed.stdinReadCount <= 1) {
+              throw new Error(`Expected multiple live stdin reads, got ${streamingParsed.stdinReadCount}`);
+            }
+            if (!streamingRunLog.includes('Streaming HTTP 200 response body into SharedArrayBuffer') || !streamingRunLog.includes('Network chunk') || !streamingRunLog.includes('Worker fd_read calls') || !streamingRunLog.includes('SharedArrayBuffer fd_read stdin')) {
+              throw new Error(`Expected live true streaming run log, got: ${streamingRunLog}`);
             }
             await browser.close();
           })();

@@ -71,15 +71,29 @@ Serve the site locally:
 bash scripts/serve-wasm-site.sh
 ```
 
-Then open `http://localhost:8080` and click **Run Benchmark**. The page loads
+Then open `http://localhost:8080` and click **Run Buffered Benchmark** or
+**Run True Streaming Benchmark**. The page loads
 `pureyaml-streaming-wasm-smoke.wasm`, lets you choose from 10+ public
-multi-megabyte YAML files, fetches the selected file in JavaScript, feeds the
-bytes to Swift through WASI stdin, and reports fetch time, parse time,
-throughput, document count, and stdout JSON.
+multi-megabyte YAML files, and reports fetch time, Swift parse time,
+throughput, document count, stdout JSON, and a timestamped run log.
 
-The browser fetch step currently buffers the selected YAML file before invoking
-the WASM guest. Inside Swift, the parser path counts documents through
-`parseDocuments` callbacks rather than retaining all parsed documents.
+Inside Swift, `SwiftWASIHTTPClient.HostHTTPClient` models that host-provided
+HTTP response. The benchmark then parses the response body through
+`PureYAMLStreaming.ChunkedUTF8Reader` and `ResumableDocumentScanner`, reporting
+chunk count, chunk size, scanner document-source emissions, fetch time, parse
+time, throughput, document count, and stdout JSON.
+
+The buffered benchmark fetches the selected YAML file in JavaScript before
+invoking the WASM guest. It keeps `SwiftWASIHTTPClient.HostHTTPClient` in the
+loop to model the host-response boundary.
+
+The experimental true-streaming benchmark requires `crossOriginIsolated`,
+`SharedArrayBuffer`, `Worker`, and `Atomics.wait`. A same-origin COOP/COEP
+service worker enables that mode on localhost and GitHub Pages. In this path,
+the main thread reads `fetch().body` with a `ReadableStream` reader, writes each
+network chunk into a `SharedArrayBuffer` ring buffer, and a Worker-owned WASI
+runtime serves those bytes through a blocking custom stdin `fd_read`. Swift then
+parses stdin with `ChunkedUTF8Reader` without calling `readDataToEndOfFile()`.
 
 ## Relationship To PureYAML
 

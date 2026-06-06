@@ -17,6 +17,14 @@ extension PureYAMLStreaming {
             self.chunkSize = chunkSize
         }
 
+        public init(fileHandle: FileHandle, chunkSize: Int = 64 * 1024) throws {
+            guard chunkSize > 0 else {
+                throw StreamingError.invalidChunkSize(chunkSize)
+            }
+            self.source = .file(fileHandle)
+            self.chunkSize = chunkSize
+        }
+
         public init(data: Data, chunkSize: Int = 64 * 1024) throws {
             guard chunkSize > 0 else {
                 throw StreamingError.invalidChunkSize(chunkSize)

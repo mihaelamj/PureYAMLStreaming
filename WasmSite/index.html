@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PureYAMLStreaming WASM Benchmark</title>
     <link rel="stylesheet" href="./style.css" />
+    <script src="./coi-serviceworker.js"></script>
   </head>
   <body>
     <main>
@@ -14,14 +15,38 @@
         <p>
           Pick a public real-world YAML file. The browser fetches it, feeds the
           bytes to the Swift WASI executable through stdin, and reports
-          Swift-measured document parse timing live.
+          Swift-measured document parse timing live. The Run Log distinguishes
+          browser buffering from Swift-side chunked scanning.
         </p>
         <label for="sampleSelect">Public YAML example</label>
         <select id="sampleSelect"></select>
         <label for="urlInput">URL</label>
         <input id="urlInput" type="url" autocomplete="off" />
-        <button id="runButton" type="button">Run Benchmark</button>
+        <button id="runButton" type="button">Run Buffered Benchmark</button>
+        <button id="streamButton" type="button">Run True Streaming Benchmark</button>
         <div id="status" class="status idle">Idle</div>
+      </section>
+
+      <section class="card">
+        <h2>Streaming Capability</h2>
+        <dl class="metrics">
+          <div>
+            <dt>Isolation</dt>
+            <dd id="isolationMetric">-</dd>
+          </div>
+          <div>
+            <dt>SharedArrayBuffer</dt>
+            <dd id="sabMetric">-</dd>
+          </div>
+          <div>
+            <dt>Worker</dt>
+            <dd id="workerMetric">-</dd>
+          </div>
+          <div>
+            <dt>Mode</dt>
+            <dd id="modeMetric">-</dd>
+          </div>
+        </dl>
       </section>
 
       <section class="card">

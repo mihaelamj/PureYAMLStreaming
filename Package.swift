@@ -19,6 +19,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/mihaelamj/PureYAML.git", branch: "main"),
+        .package(url: "https://github.com/mihaelamj/SwiftWASIHTTPClient.git", branch: "main"),
     ],
     targets: [
         .target(
@@ -27,7 +28,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "PureYAMLStreamingWasmSmoke",
-            dependencies: ["PureYAMLStreaming", "PureYAML"],
+            dependencies: [
+                "PureYAMLStreaming",
+                "PureYAML",
+                .product(name: "WASIHTTPClient", package: "SwiftWASIHTTPClient"),
+            ],
         ),
         .testTarget(
             name: "PureYAMLStreamingTests",
