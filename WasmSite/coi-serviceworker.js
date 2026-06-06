@@ -1,7 +1,7 @@
 (() => {
   const coop = "same-origin";
-  const coep = "credentialless";
-  const reloadKey = "pureyamlStreamingCOIReloadedV2";
+  const coep = "require-corp";
+  const reloadKey = "pureyamlStreamingCOIReloadedV3";
 
   if (typeof Window !== "undefined" && self instanceof Window) {
     if (window.crossOriginIsolated || !("serviceWorker" in navigator) || !window.isSecureContext) {
